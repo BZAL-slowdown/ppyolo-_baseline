@@ -22,6 +22,7 @@ output/
 inference_model/
 runs/
 log/
+bbox.json
 *.pdparams
 *.pdopt
 *.pdmodel
@@ -33,4 +34,3 @@ log/
 Thumbs.db
 .idea/
 .vscode/
-
