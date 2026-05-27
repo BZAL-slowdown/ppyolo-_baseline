@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+
+# Raw and generated data
+A_train/
+datasets/
+*.zip
+*.tar
+*.tar.gz
+*.rar
+
+# PaddleDetection / training artifacts
+external/
+output/
+inference_model/
+runs/
+log/
+*.pdparams
+*.pdopt
+*.pdmodel
+*.pdiparams
+*.pdiparams.info
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+

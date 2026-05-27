@@ -1,0 +1,24 @@
+metric: COCO
+num_classes: 3
+
+TrainDataset:
+  name: COCODataSet
+  image_dir: images
+  anno_path: annotations/train.json
+  dataset_dir: ../../datasets/softcup
+  data_fields:
+    - image
+    - gt_bbox
+    - gt_class
+    - is_crowd
+
+EvalDataset:
+  name: COCODataSet
+  image_dir: images
+  anno_path: annotations/val.json
+  dataset_dir: ../../datasets/softcup
+
+TestDataset:
+  name: ImageFolder
+  anno_path: ../../datasets/softcup/annotations/val.json
+
