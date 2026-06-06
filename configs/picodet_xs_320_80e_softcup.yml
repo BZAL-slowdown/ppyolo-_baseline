@@ -1,0 +1,24 @@
+_BASE_:
+- ../picodet/picodet_xs_320_coco_lcnet.yml
+- ./softcup_coco.yml
+
+epoch: 80
+snapshot_epoch: 5
+weights: https://paddledet.bj.bcebos.com/models/pretrained/LCNet_x0_35_pretrained.pdparams
+
+num_classes: 3
+
+PicoHeadV2:
+  num_classes: 3
+
+TrainReader:
+  batch_size: 32
+
+LearningRate:
+  base_lr: 0.08
+  schedulers:
+  - !CosineDecay
+    max_epochs: 80
+  - !LinearWarmup
+    start_factor: 0.1
+    steps: 300
