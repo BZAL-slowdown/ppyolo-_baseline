@@ -165,7 +165,7 @@ def main(infer_txt, result_path):
     image_list = get_test_images(infer_txt)
     detector = Detector(os.path.join(BASE_DIR, "model"))
     threshold = float(os.environ.get("THRESHOLD", "0.5"))
-    interval = int(os.environ.get("DETECT_INTERVAL", "24"))
+    interval = int(os.environ.get("DETECT_INTERVAL", "8"))
     max_gap = int(os.environ.get("MAX_TRACK_GAP", "50"))
 
     results = {"result": []}
