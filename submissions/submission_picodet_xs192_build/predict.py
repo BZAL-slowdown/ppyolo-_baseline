@@ -171,7 +171,7 @@ def append_box(results, image_id, obj_type, x, y, width, height):
 def predict_images(image_list, result_path, threshold=0.4, batch_size=8):
     predictor = load_predictor(os.path.join(BASE_DIR, "model"))
     results = {"result": []}
-    skip_every = int(os.environ.get("FAST_SKIP_EVERY", "6"))
+    skip_every = int(os.environ.get("FAST_SKIP_EVERY", "10"))
     skip_mode = os.environ.get("FAST_SKIP_MODE", "empty")
     model_paths = []
     for idx, path in enumerate(image_list):
