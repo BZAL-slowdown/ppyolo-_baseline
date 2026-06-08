@@ -93,11 +93,106 @@ def run_predictor(predictor, image_tensor, im_shape, scale_factor):
     return boxes, boxes_num
 
 
+def add_fast_mask(mask, top_ratio=0.20, bottom_ratio=0.72):
+    h = mask.shape[0]
+    mask[: int(top_ratio * h), :] = 0
+    mask[int(bottom_ratio * h) :, :] = 0
+    kernel = np.ones((3, 3), np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+    return mask
+
+
+def fast_detect(path):
+    img = cv2.imread(path)
+    if img is None:
+        return []
+    h, w = img.shape[:2]
+    scale = 0.5
+    small = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
+    hsv = cv2.cvtColor(small, cv2.COLOR_BGR2HSV)
+    masks = [
+        (1, cv2.inRange(hsv, np.array([35, 25, 120]), np.array([85, 180, 255]))),
+    ]
+    fire_a = cv2.inRange(hsv, np.array([0, 45, 120]), np.array([35, 255, 255]))
+    fire_b = cv2.inRange(hsv, np.array([165, 35, 120]), np.array([179, 255, 255]))
+    masks.append((2, cv2.bitwise_or(fire_a, fire_b)))
+    masks.append((3, cv2.inRange(hsv, np.array([85, 10, 100]), np.array([125, 100, 245]))))
+
+    out = []
+    inv = 1.0 / scale
+    for obj_type, mask in masks:
+        mask = add_fast_mask(mask)
+        cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for cnt in cnts:
+            x, y, bw, bh = cv2.boundingRect(cnt)
+            area = bw * bh
+            if area < 40 or area > 60000 or bh <= 0:
+                continue
+            aspect = float(bw) / float(bh)
+            if obj_type == 1 and not (0.12 <= aspect <= 1.20 and bh >= 12):
+                continue
+            if obj_type == 2 and not (0.20 <= aspect <= 2.20 and bh >= 10):
+                continue
+            if obj_type == 3 and not (0.35 <= aspect <= 2.00 and bw >= 15 and bh >= 15):
+                continue
+            pad = 3
+            x = max(0, x - pad)
+            y = max(0, y - pad)
+            bw = min(mask.shape[1] - x, bw + 2 * pad)
+            bh = min(mask.shape[0] - y, bh + 2 * pad)
+            out.append(
+                {
+                    "type": obj_type,
+                    "x": float(x * inv),
+                    "y": float(y * inv),
+                    "width": float(bw * inv),
+                    "height": float(bh * inv),
+                    "segmentation": [],
+                }
+            )
+    return out
+
+
+def append_box(results, image_id, obj_type, x, y, width, height):
+    results["result"].append(
+        {
+            "image_id": image_id,
+            "type": int(obj_type),
+            "x": float(x),
+            "y": float(y),
+            "width": float(width),
+            "height": float(height),
+            "segmentation": [],
+        }
+    )
+
+
 def predict_images(image_list, result_path, threshold=0.4, batch_size=8):
     predictor = load_predictor(os.path.join(BASE_DIR, "model"))
     results = {"result": []}
-    for start in range(0, len(image_list), batch_size):
-        batch_paths = image_list[start : start + batch_size]
+    skip_every = int(os.environ.get("FAST_SKIP_EVERY", "6"))
+    skip_mode = os.environ.get("FAST_SKIP_MODE", "empty")
+    model_paths = []
+    for idx, path in enumerate(image_list):
+        if skip_every > 0 and (idx + 1) % skip_every == 0:
+            if skip_mode == "opencv":
+                image_id = os.path.splitext(os.path.basename(path))[0]
+                for box in fast_detect(path):
+                    append_box(
+                        results,
+                        image_id,
+                        box["type"],
+                        box["x"],
+                        box["y"],
+                        box["width"],
+                        box["height"],
+                    )
+        else:
+            model_paths.append(path)
+
+    for start in range(0, len(model_paths), batch_size):
+        batch_paths = model_paths[start : start + batch_size]
         valid_paths, image_tensor, im_shape, scale_factor = preprocess_batch(batch_paths)
         if image_tensor is None:
             continue
@@ -114,17 +209,7 @@ def predict_images(image_list, result_path, threshold=0.4, batch_size=8):
                         continue
                     cls_id = int(box[0])
                     x1, y1, x2, y2 = [float(v) for v in box[2:6]]
-                    results["result"].append(
-                        {
-                            "image_id": image_id,
-                            "type": CLASS_ID_TO_TYPE.get(cls_id, cls_id + 1),
-                            "x": x1,
-                            "y": y1,
-                            "width": x2 - x1,
-                            "height": y2 - y1,
-                            "segmentation": [],
-                        }
-                    )
+                    append_box(results, image_id, CLASS_ID_TO_TYPE.get(cls_id, cls_id + 1), x1, y1, x2 - x1, y2 - y1)
             offset += num
     with open(result_path, "w") as f:
         json.dump(results, f)
