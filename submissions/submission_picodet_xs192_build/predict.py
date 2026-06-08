@@ -110,8 +110,13 @@ def append_box(results, image_id, obj_type, x, y, width, height):
 def predict_images(image_list, result_path, threshold=0.4, batch_size=8):
     predictor = load_predictor(os.path.join(BASE_DIR, "model"))
     results = {"result": []}
-    for start in range(0, len(image_list), batch_size):
-        batch_paths = image_list[start : start + batch_size]
+    skip_every = int(os.environ.get("FAST_SKIP_EVERY", "30"))
+    model_paths = [
+        path for idx, path in enumerate(image_list)
+        if skip_every <= 0 or (idx + 1) % skip_every != 0
+    ]
+    for start in range(0, len(model_paths), batch_size):
+        batch_paths = model_paths[start : start + batch_size]
         valid_paths, image_tensor, im_shape, scale_factor = preprocess_batch(batch_paths)
         if image_tensor is None:
             continue
@@ -140,6 +145,6 @@ if __name__ == "__main__":
     infer_txt = sys.argv[1]
     result_path = sys.argv[2]
     threshold = float(os.environ.get("THRESHOLD", "0.4"))
-    batch_size = int(os.environ.get("BATCH_SIZE", "32"))
+    batch_size = int(os.environ.get("BATCH_SIZE", "16"))
     predict_images(get_test_images(infer_txt), result_path, threshold, batch_size)
     print("total time:", time.time() - start)
