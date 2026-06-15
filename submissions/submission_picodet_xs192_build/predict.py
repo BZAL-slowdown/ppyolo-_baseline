@@ -17,6 +17,13 @@ MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 
 
+def read_image(path):
+    data = np.fromfile(path, dtype=np.uint8)
+    if data.size == 0:
+        return None
+    return cv2.imdecode(data, cv2.IMREAD_COLOR)
+
+
 def get_test_images(infer_file):
     infer_dir = os.path.dirname(os.path.abspath(infer_file))
     images = []
@@ -27,14 +34,25 @@ def get_test_images(infer_file):
                 continue
             if not os.path.isabs(line):
                 line = os.path.join(infer_dir, line)
+                if not os.path.exists(line):
+                    cwd_line = os.path.abspath(line.replace(infer_dir, os.getcwd(), 1))
+                    if os.path.exists(cwd_line):
+                        line = cwd_line
             images.append(line)
     return images
 
 
 def load_predictor(model_dir):
+    model_file = os.path.join(model_dir, "model.pdmodel")
+    params_file = os.path.join(model_dir, "model.pdiparams")
+    try:
+        model_file = os.path.relpath(model_file, os.getcwd())
+        params_file = os.path.relpath(params_file, os.getcwd())
+    except ValueError:
+        pass
     config = Config(
-        os.path.join(model_dir, "model.pdmodel"),
-        os.path.join(model_dir, "model.pdiparams"),
+        model_file,
+        params_file,
     )
     config.disable_gpu()
     config.set_cpu_math_library_num_threads(int(os.environ.get("CPU_THREADS", "4")))
@@ -51,9 +69,10 @@ def preprocess_batch(paths):
     images = []
     im_shapes = []
     scale_factors = []
+    origin_shapes = []
     valid_paths = []
     for path in paths:
-        img = cv2.imread(path)
+        img = read_image(path)
         if img is None:
             continue
         origin_h, origin_w = img.shape[:2]
@@ -65,14 +84,16 @@ def preprocess_batch(paths):
         images.append(chw)
         im_shapes.append([TARGET_SIZE, TARGET_SIZE])
         scale_factors.append([TARGET_SIZE / float(origin_h), TARGET_SIZE / float(origin_w)])
+        origin_shapes.append([origin_h, origin_w])
         valid_paths.append(path)
     if not images:
-        return valid_paths, None, None, None
+        return valid_paths, None, None, None, None
     return (
         valid_paths,
         np.ascontiguousarray(np.stack(images, axis=0), dtype=np.float32),
         np.array(im_shapes, dtype=np.float32),
         np.array(scale_factors, dtype=np.float32),
+        origin_shapes,
     )
 
 
@@ -107,17 +128,21 @@ def append_box(results, image_id, obj_type, x, y, width, height):
     )
 
 
+def clip_box(x1, y1, x2, y2, origin_h, origin_w):
+    x1 = min(max(float(x1), 0.0), float(origin_w))
+    y1 = min(max(float(y1), 0.0), float(origin_h))
+    x2 = min(max(float(x2), 0.0), float(origin_w))
+    y2 = min(max(float(y2), 0.0), float(origin_h))
+    return x1, y1, x2, y2
+
+
 def predict_images(image_list, result_path, threshold=0.4, batch_size=8):
     predictor = load_predictor(os.path.join(BASE_DIR, "model"))
     results = {"result": []}
-    skip_every = int(os.environ.get("FAST_SKIP_EVERY", "0"))
-    model_paths = [
-        path for idx, path in enumerate(image_list)
-        if skip_every <= 0 or (idx + 1) % skip_every != 0
-    ]
+    model_paths = image_list
     for start in range(0, len(model_paths), batch_size):
         batch_paths = model_paths[start : start + batch_size]
-        valid_paths, image_tensor, im_shape, scale_factor = preprocess_batch(batch_paths)
+        valid_paths, image_tensor, im_shape, scale_factor, origin_shapes = preprocess_batch(batch_paths)
         if image_tensor is None:
             continue
         boxes, boxes_num = run_predictor(predictor, image_tensor, im_shape, scale_factor)
@@ -133,6 +158,10 @@ def predict_images(image_list, result_path, threshold=0.4, batch_size=8):
                         continue
                     cls_id = int(box[0])
                     x1, y1, x2, y2 = [float(v) for v in box[2:6]]
+                    origin_h, origin_w = origin_shapes[batch_idx]
+                    x1, y1, x2, y2 = clip_box(x1, y1, x2, y2, origin_h, origin_w)
+                    if x2 <= x1 or y2 <= y1:
+                        continue
                     append_box(results, image_id, CLASS_ID_TO_TYPE.get(cls_id, cls_id + 1), x1, y1, x2 - x1, y2 - y1)
             offset += num
     with open(result_path, "w") as f:
@@ -144,7 +173,7 @@ if __name__ == "__main__":
     paddle.enable_static()
     infer_txt = sys.argv[1]
     result_path = sys.argv[2]
-    threshold = float(os.environ.get("THRESHOLD", "0.4"))
-    batch_size = int(os.environ.get("BATCH_SIZE", "16"))
+    threshold = float(os.environ.get("THRESHOLD", "0.45"))
+    batch_size = int(os.environ.get("BATCH_SIZE", "8"))
     predict_images(get_test_images(infer_txt), result_path, threshold, batch_size)
     print("total time:", time.time() - start)
