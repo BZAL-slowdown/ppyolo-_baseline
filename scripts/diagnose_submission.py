@@ -20,6 +20,7 @@ def parse_args():
     parser.add_argument("--iou-threshold", type=float, default=0.5)
     parser.add_argument("--cpu-threads", type=int, default=4)
     parser.add_argument("--mkldnn", action="store_true")
+    parser.add_argument("--official-label-space", action="store_true")
     parser.add_argument("--json-out", default="")
     return parser.parse_args()
 
@@ -54,6 +55,17 @@ def load_ground_truth(anno_path):
             }
         )
     return gt_by_image
+
+
+def convert_gt_to_official_label_space(gt_by_image):
+    mapping = {1: 1, 2: 3, 3: 2}
+    converted = defaultdict(list)
+    for image_id, items in gt_by_image.items():
+        for item in items:
+            new_item = dict(item)
+            new_item["type"] = mapping[new_item["type"]]
+            converted[image_id].append(new_item)
+    return converted
 
 
 def box_iou(a, b):
@@ -216,6 +228,8 @@ def main():
     module = load_predict_module(submission_dir)
     image_list = resolve_local_images(module, args.val_list)
     gt_by_image = load_ground_truth(args.anno)
+    if args.official_label_space:
+        gt_by_image = convert_gt_to_official_label_space(gt_by_image)
 
     total_start = time.perf_counter()
     results, timings, valid_images = profile_predict(
@@ -235,6 +249,7 @@ def main():
         "batch_size": args.batch_size,
         "cpu_threads": args.cpu_threads,
         "mkldnn": args.mkldnn,
+        "official_label_space": args.official_label_space,
         "total_time_sec": total_time,
         "fps": valid_images / total_time if total_time > 0 else 0.0,
         "timings_sec": timings,
